@@ -1,0 +1,404 @@
+// ============================================================
+// LegacyLens — Database Schema (Prisma)
+// All persistent data lives in PostgreSQL.
+// Redis is used only for metadata (BullMQ job state, rate limits, sessions).
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USER & AUTHENTICATION
+// ============================================================
+
+model User {
+  id        String @id @default(uuid())
+  email     String @unique
+  name      String?
+  avatarUrl String? @map("avatar_url")
+
+  // Clerk auth (primary)
+  clerkId String? @unique @map("clerk_id")
+
+  // GitHub integration (for repo access; optional)
+  githubId       String? @unique @map("github_id")
+  githubToken    String? @map("github_token") // Encrypted
+  githubUsername String? @map("github_username")
+
+  // Billing
+  credits          Int    @default(1000)
+  subscriptionTier String @default("free") @map("subscription_tier") // free, pro, team, enterprise
+
+  // Relations
+  projects        UserToProject[]
+  qaConversations QAConversation[]
+  assignedCards   Card[]           @relation("AssignedCards")
+  subscriptions   Subscription[]
+  usageLogs       UsageLog[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// ============================================================
+// PROJECTS
+// ============================================================
+
+model Project {
+  id   String @id @default(uuid())
+  name String
+
+  // GitHub repo
+  githubUrl     String    @map("github_url")
+  githubRepoId  String?   @map("github_repo_id")
+  defaultBranch String    @default("main") @map("default_branch")
+  lastSyncedAt  DateTime? @map("last_synced_at")
+
+  // Repo metadata (fetched from GitHub API)
+  repoOwner       String?  @map("repo_owner")
+  repoName        String?  @map("repo_name")
+  repoDescription String?  @map("repo_description")
+  repoStars       Int      @default(0) @map("repo_stars")
+  repoForks       Int      @default(0) @map("repo_forks")
+  repoLanguage    String?  @map("repo_language")
+  repoVisibility  String   @default("public") @map("repo_visibility") // public, private
+  repoTopics      String[] @map("repo_topics")
+  repoAvatarUrl   String?  @map("repo_avatar_url") // Owner's avatar
+
+  // GitHub Personal Access Token (for private repos, encrypted at rest)
+  githubPat String? @map("github_pat")
+
+  // Indexing status
+  status         String @default("pending") // pending, indexing, complete, failed
+  totalFiles     Int    @default(0) @map("total_files")
+  processedFiles Int    @default(0) @map("processed_files")
+  totalLines     Int    @default(0) @map("total_lines")
+  indexingError  String? @map("indexing_error")
+
+  // Generated artifacts
+  architectureJson Json?    @map("architecture_json") // Dependency graph
+  techStack        Json?    @map("tech_stack") // { languages: [], frameworks: [] }
+  entryPoints      String[] @map("entry_points") // ["/src/index.js", "/main.py"]
+
+  // Relations
+  members         UserToProject[]
+  files           File[]
+  commits         Commit[]
+  qaConversations QAConversation[]
+  meetings        Meeting[]
+  boards          Board[]
+  embeddings      Embedding[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("projects")
+}
+
+// Many-to-many: Users <-> Projects
+model UserToProject {
+  id        String @id @default(uuid())
+  userId    String @map("user_id")
+  projectId String @map("project_id")
+  role      String @default("member") // owner, admin, member, viewer
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([userId, projectId])
+  @@index([projectId])
+  @@index([userId])
+  @@map("user_to_project")
+}
+
+// ============================================================
+// FILES & CODE STRUCTURE
+// ============================================================
+
+model File {
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
+
+  // File metadata
+  filePath    String @map("file_path") // relative to repo root
+  fileType    String @map("file_type") // js, ts, py, java, etc.
+  linesOfCode Int    @map("lines_of_code")
+
+  // Parsed structure
+  functions Json? // [{ name, params, lineStart, lineEnd }]
+  classes   Json? // [{ name, methods, lineStart, lineEnd }]
+  imports   Json? // [{ module, items }]
+  exports   Json? // [{ name, type }]
+
+  // Dependency analysis
+  isEntryPoint      Boolean @default(false) @map("is_entry_point")
+  riskLevel         String  @default("low") @map("risk_level") // low, medium, high, critical
+  dependentsCount   Int     @default(0) @map("dependents_count")
+  dependenciesCount Int     @default(0) @map("dependencies_count")
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([projectId, filePath])
+  @@index([projectId])
+  @@index([riskLevel])
+  @@map("files")
+}
+
+// ============================================================
+// COMMITS (for history & context)
+// ============================================================
+
+model Commit {
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
+
+  commitHash  String   @map("commit_hash")
+  message     String
+  author      String
+  authorEmail String   @map("author_email")
+  committedAt DateTime @map("committed_at")
+
+  // Files changed
+  filesChanged String[] @map("files_changed")
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([projectId, commitHash])
+  @@index([projectId])
+  @@index([committedAt])
+  @@map("commits")
+}
+
+// ============================================================
+// Q&A CONVERSATIONS
+// ============================================================
+
+model QAConversation {
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
+  userId    String @map("user_id")
+
+  question String
+  answer   String?
+
+  // Context used
+  contextFiles Json? @map("context_files") // [{ path, snippet, score }]
+
+  // Performance
+  responseTimeMs Int? @map("response_time_ms")
+  tokenCount     Int? @map("token_count")
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("qa_conversations")
+}
+
+// ============================================================
+// MEETINGS & TRANSCRIPTION
+// ============================================================
+
+model Meeting {
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
+
+  title           String?
+  durationSeconds Int?    @map("duration_seconds")
+  fileUrl         String? @map("file_url") // Backblaze B2 URL; null for live meetings
+
+  // Source: upload (file) or live (recorded in-app)
+  source String @default("upload") @map("source") // upload | live
+
+  // Transcription
+  transcriptionStatus String  @default("pending") @map("transcription_status") // pending, processing, complete, failed, live
+  transcriptText      String? @map("transcript_text") @db.Text
+
+  // AI-generated summary (after meeting ends, especially for live)
+  summary String? @map("summary") @db.Text
+
+  // AI-extracted insights
+  insights Json? // { decisions: [], actionItems: [], risks: [], technicalDiscussions: [] }
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId])
+  @@index([transcriptionStatus])
+  @@map("meetings")
+}
+
+// ============================================================
+// TASK BOARD (Trello-style)
+// ============================================================
+
+model Board {
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
+
+  name String @default("Onboarding")
+
+  // Relations
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  columns Column[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@map("boards")
+}
+
+model Column {
+  id      String @id @default(uuid())
+  boardId String @map("board_id")
+
+  name     String
+  position Int // Order: 0, 1, 2...
+
+  // Relations
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([boardId])
+  @@map("columns")
+}
+
+model Card {
+  id       String @id @default(uuid())
+  columnId String @map("column_id")
+
+  title       String
+  description String?
+  position    Int // Order within column
+
+  // Links
+  linkedFiles String[] @map("linked_files") // File paths
+  linkedQaIds String[] @map("linked_qa_ids") // QAConversation IDs
+
+  // Assignment
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("AssignedCards", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  // Time tracking
+  timeSpentMinutes Int @default(0) @map("time_spent_minutes")
+
+  // Relations
+  column Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([columnId])
+  @@index([assignedToId])
+  @@map("cards")
+}
+
+// ============================================================
+// BILLING & SUBSCRIPTIONS
+// ============================================================
+
+model Subscription {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+
+  // Stripe data
+  stripeCustomerId     String  @unique @map("stripe_customer_id")
+  stripeSubscriptionId String? @map("stripe_subscription_id")
+
+  tier   String @default("free") // free, pro, team, enterprise
+  status String @default("active") // active, canceled, past_due, trialing
+
+  currentPeriodEnd  DateTime? @map("current_period_end")
+  cancelAtPeriodEnd Boolean   @default(false) @map("cancel_at_period_end")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model UsageLog {
+  id        String  @id @default(uuid())
+  userId    String  @map("user_id")
+  projectId String? @map("project_id")
+
+  action      String // index, qa, meeting, export
+  costCredits Int    @map("cost_credits") // Credits consumed
+  metadata    Json? // { filesCount, tokensUsed, etc. }
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("usage_logs")
+}
+
+// ============================================================
+// EMBEDDINGS (pgvector — all vectors stored in PostgreSQL)
+// ============================================================
+
+model Embedding {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+
+  // Type: file | function | class | meeting_chunk
+  type String
+
+  // Code embedding fields
+  filePath String? @map("file_path")
+  content  String? @db.Text
+  fileId   String? @map("file_id")
+
+  // Meeting chunk fields
+  meetingId     String?  @map("meeting_id")
+  timestampStart Float?   @map("timestamp_start")
+  timestampEnd   Float?   @map("timestamp_end")
+
+  // Vector (1024 dimensions — Cohere embed-english-v3.0)
+  embedding Unsupported("vector(1024)")?
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@index([type])
+  @@map("embeddings")
+}

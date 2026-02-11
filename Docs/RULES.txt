@@ -1,0 +1,1070 @@
+# RULES.txt — LegacyLens Development Guidelines for Cursor AI
+
+## 🎯 PROJECT OVERVIEW
+
+**Product Name:** LegacyLens  
+**Tagline:** "Onboard to any codebase in hours, not weeks"  
+**Type:** AI-powered legacy code intelligence platform
+
+**Core Value Proposition:**
+Help developers understand inherited/legacy codebases 10x faster using:
+- AI-powered semantic code search and Q&A
+- Automatic architecture visualization
+- Meeting → code linking
+- Trello-style onboarding task board
+
+**Target Users:**
+1. Software consultancies & dev agencies (primary)
+2. New hires at tech companies (secondary)
+3. Engineering managers (tertiary)
+
+---
+
+## 📐 ARCHITECTURE PRINCIPLES
+
+### **1. Start Simple, Scale Intentionally**
+- MVP: Monolithic API server + separate background workers
+- Use message queues (BullMQ) for heavy tasks (indexing, transcription)
+- Avoid premature microservices — extract only when needed
+
+### **2. Cost-First Mentality**
+- Use cheapest reliable AI APIs:
+  - Groq (LLM + transcription) — 10x cheaper than OpenAI
+  - Cohere (embeddings + reranking) — cheapest embeddings
+- Aggressive caching (Redis, 1hr TTL for Q&A)
+- Backblaze B2 for storage (10x cheaper than S3)
+- Supabase for PostgreSQL + Auth (generous free tier)
+
+### **3. Type Safety Everywhere**
+- Full TypeScript (no `any` types allowed)
+- Zod for runtime validation
+- Prisma for type-safe database queries
+- tRPC for type-safe API (shared types between frontend/backend)
+
+### **4. Developer Experience First**
+- Fast local dev setup (<5 minutes)
+- Hot reload for frontend + backend
+- Docker Compose for local dependencies (Redis, Postgres)
+- Clear error messages (no cryptic stack traces)
+
+---
+
+## 🛠️ TECH STACK (Non-Negotiable)
+
+### **Frontend**
+```
+Framework:      React 19 + Vite
+Styling:        TailwindCSS + shadcn/ui
+State:          Zustand (client), React Query (server)
+API Client:     tRPC (type-safe)
+Routing:        React Router v6
+Visualization:  D3.js (architecture graph)
+```
+
+### **Backend**
+```
+Server:         Fastify (Node.js 20)
+API:            tRPC
+ORM:            Prisma
+Validation:     Zod
+Jobs:           BullMQ (Redis-based queue)
+Auth:           Supabase Auth (JWT)
+```
+
+### **Databases**
+```
+Primary:        PostgreSQL (Supabase) — all persistent data including vector embeddings (pgvector)
+Metadata only:  Redis — BullMQ job state, rate limits, sessions (no application data)
+File Storage:   Backblaze B2
+```
+
+### **AI Services**
+```
+LLM:            Groq API (Mixtral 8x7B)
+Embeddings:     Cohere Embed v3 (1024-dim, stored in PostgreSQL via pgvector)
+Transcription:  Groq Whisper
+Reranking:      Cohere Rerank v3
+```
+
+### **Infrastructure**
+```
+Hosting:        Fly.io (Docker containers)
+CDN:            Cloudflare
+Payments:       Stripe
+Monitoring:     Sentry (errors), Betterstack (uptime)
+CI/CD:          GitHub Actions
+```
+
+---
+
+## 📂 PROJECT STRUCTURE (Enforce This)
+
+```
+legacylens/
+├── src/
+│   ├── app/                          # Frontend (React)
+│   │   ├── (auth)/                   # Auth routes
+│   │   │   ├── login/
+│   │   │   └── callback/
+│   │   ├── (dashboard)/              # Main app routes
+│   │   │   ├── layout.tsx
+│   │   │   ├── page.tsx              # Project list
+│   │   │   └── project/
+│   │   │       └── [id]/
+│   │   │           ├── page.tsx      # Project overview
+│   │   │           ├── architecture/
+│   │   │           ├── qa/
+│   │   │           ├── board/
+│   │   │           └── meetings/
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   ├── components/                   # React components
+│   │   ├── ui/                       # shadcn components
+│   │   ├── ArchitectureGraph.tsx
+│   │   ├── QAChat.tsx
+│   │   ├── KanbanBoard.tsx
+│   │   └── FileExplorer.tsx
+│   ├── lib/                          # Utilities
+│   │   ├── trpc.ts                   # tRPC client
+│   │   ├── supabase.ts               # Supabase client
+│   │   └── utils.ts
+│   ├── server/                       # Backend
+│   │   ├── routers/                  # tRPC routers
+│   │   │   ├── index.ts
+│   │   │   ├── auth.ts
+│   │   │   ├── project.ts
+│   │   │   ├── qa.ts
+│   │   │   ├── meeting.ts
+│   │   │   ├── board.ts
+│   │   │   └── billing.ts
+│   │   ├── services/                 # Business logic
+│   │   │   ├── github.ts             # GitHub API
+│   │   │   ├── search.ts             # Vector search
+│   │   │   ├── llm.ts                # Groq LLM
+│   │   │   ├── embeddings.ts         # Cohere
+│   │   │   ├── parser.ts             # Tree-sitter
+│   │   │   └── analyzer.ts           # Dependency graph
+│   │   ├── queues/                   # BullMQ setup
+│   │   │   ├── indexing.queue.ts
+│   │   │   └── transcription.queue.ts
+│   │   ├── middleware/
+│   │   │   ├── auth.ts
+│   │   │   └── ratelimit.ts
+│   │   ├── trpc.ts                   # tRPC context
+│   │   └── index.ts                  # Fastify server
+│   ├── workers/                      # Background workers
+│   │   ├── indexing.worker.ts
+│   │   ├── transcription.worker.ts
+│   │   └── embedding.worker.ts
+│   └── types/                        # Shared TypeScript types
+│       └── index.ts
+├── prisma/
+│   ├── schema.prisma                 # Database schema
+│   └── migrations/
+├── public/                           # Static assets
+├── docker-compose.yml                # Local dev environment
+├── Dockerfile                        # Production image
+├── fly.toml                          # Fly.io config
+├── .env.example                      # Environment variables template
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+└── README.md
+```
+
+---
+
+## 🔧 CODING STANDARDS
+
+### **TypeScript**
+
+**✅ ALWAYS:**
+```typescript
+// Use strict types
+interface User {
+  id: string;
+  email: string;
+  credits: number;
+}
+
+// Explicit return types on functions
+async function getUser(id: string): Promise<User | null> {
+  return await prisma.user.findUnique({ where: { id } });
+}
+
+// Use Zod for runtime validation
+const CreateProjectSchema = z.object({
+  name: z.string().min(1).max(100),
+  githubUrl: z.string().url().optional(),
+});
+
+// Proper error handling
+try {
+  await indexProject(projectId);
+} catch (error) {
+  logger.error({ error, projectId }, 'Indexing failed');
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'Failed to index project',
+  });
+}
+```
+
+**❌ NEVER:**
+```typescript
+// No 'any' types
+let data: any = await fetchData(); // ❌
+
+// No non-null assertions unless absolutely certain
+const user = await getUser(id)!; // ❌
+
+// No unhandled promises
+fetchData(); // ❌ (no await or .catch())
+
+// No console.log in production code
+console.log('User created'); // ❌ (use logger)
+```
+
+---
+
+### **React Components**
+
+**✅ ALWAYS:**
+```typescript
+// Use functional components + hooks
+export function ProjectCard({ project }: { project: Project }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{project.name}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* ... */}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Extract complex logic to custom hooks
+function useProjectIndexing(projectId: string) {
+  const { data, isLoading } = trpc.project.get.useQuery({ projectId });
+  
+  return {
+    project: data,
+    isIndexing: data?.status === 'indexing',
+    isLoading,
+  };
+}
+
+// Use React Query for server state
+function ProjectList() {
+  const { data: projects, isLoading } = trpc.project.list.useQuery();
+  
+  if (isLoading) return <Skeleton />;
+  
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      {projects?.map(p => <ProjectCard key={p.id} project={p} />)}
+    </div>
+  );
+}
+```
+
+**❌ NEVER:**
+```typescript
+// No class components (unless absolutely necessary)
+class MyComponent extends React.Component { /* ... */ } // ❌
+
+// No inline styles (use Tailwind)
+<div style={{ color: 'red' }}>Text</div> // ❌
+
+// No prop drilling (use context or state management)
+<Child user={user} theme={theme} settings={settings} /> // ❌
+
+// No fetch/axios in components (use tRPC)
+useEffect(() => {
+  fetch('/api/projects').then(/* ... */); // ❌
+}, []);
+```
+
+---
+
+### **Backend (tRPC)**
+
+**✅ ALWAYS:**
+```typescript
+// Protect routes that need authentication
+export const projectRouter = router({
+  create: protectedProcedure // ✅ Requires auth
+    .input(CreateProjectSchema)
+    .mutation(async ({ input, ctx }) => {
+      // ctx.user is guaranteed to exist
+      const project = await ctx.prisma.project.create({
+        data: {
+          name: input.name,
+          members: {
+            create: {
+              userId: ctx.user.id,
+              role: 'owner',
+            },
+          },
+        },
+      });
+      
+      return project;
+    }),
+});
+
+// Use transactions for multi-step operations
+await prisma.$transaction(async (tx) => {
+  await tx.user.update({ where: { id }, data: { credits: { decrement: 100 } } });
+  await tx.usageLog.create({ data: { userId: id, action: 'index', costCredits: 100 } });
+});
+
+// Validate all inputs with Zod
+.input(z.object({
+  projectId: z.string().uuid(),
+  question: z.string().min(1).max(500),
+}))
+```
+
+**❌ NEVER:**
+```typescript
+// No unprotected mutations
+export const projectRouter = router({
+  delete: publicProcedure // ❌ Should be protectedProcedure
+    .mutation(async ({ input }) => {
+      await prisma.project.delete({ where: { id: input.id } });
+    }),
+});
+
+// No raw SQL (use Prisma unless absolutely necessary)
+await prisma.$queryRaw`DELETE FROM projects WHERE id = ${id}`; // ❌
+
+// No missing error handling
+const project = await prisma.project.findUnique({ where: { id } });
+return project.name; // ❌ (what if project is null?)
+```
+
+---
+
+### **Database (Prisma)**
+
+**✅ ALWAYS:**
+```typescript
+// Use relations instead of manual joins
+const project = await prisma.project.findUnique({
+  where: { id },
+  include: {
+    files: true,
+    members: { include: { user: true } },
+  },
+});
+
+// Use transactions for consistency
+await prisma.$transaction([
+  prisma.project.update({ where: { id }, data: { status: 'complete' } }),
+  prisma.user.update({ where: { id: userId }, data: { credits: { increment: 50 } } }),
+]);
+
+// Create indexes for performance
+@@index([projectId])
+@@index([createdAt])
+```
+
+**❌ NEVER:**
+```typescript
+// No N+1 queries
+const projects = await prisma.project.findMany();
+for (const project of projects) {
+  const files = await prisma.file.findMany({ where: { projectId: project.id } }); // ❌
+}
+
+// Use include instead:
+const projects = await prisma.project.findMany({
+  include: { files: true } // ✅
+});
+```
+
+---
+
+### **Worker Jobs (BullMQ)**
+
+**✅ ALWAYS:**
+```typescript
+// Update progress for long-running jobs
+await job.updateProgress(50); // Show user progress
+
+// Handle failures gracefully
+const worker = new Worker('indexing', async (job) => {
+  try {
+    await indexProject(job.data.projectId);
+  } catch (error) {
+    logger.error({ error, jobId: job.id }, 'Job failed');
+    
+    await prisma.project.update({
+      where: { id: job.data.projectId },
+      data: { status: 'failed', indexingError: error.message },
+    });
+    
+    throw error; // Let BullMQ handle retries
+  }
+}, {
+  connection: redisConnection,
+  concurrency: 2,
+  limiter: {
+    max: 10,
+    duration: 60000, // Max 10 jobs per minute
+  },
+});
+
+// Always clean up temp files
+try {
+  await processFiles(tempDir);
+} finally {
+  await fs.rm(tempDir, { recursive: true });
+}
+```
+
+**❌ NEVER:**
+```typescript
+// No infinite loops or blocking
+while (true) { // ❌
+  await checkStatus();
+}
+
+// No missing cleanup
+await cloneRepo(tempDir);
+await processRepo(tempDir);
+// ❌ Forgot to delete tempDir
+
+// No silent failures
+try {
+  await processJob();
+} catch (error) {
+  // ❌ Swallowed error, job marked as success
+}
+```
+
+---
+
+## 🔐 SECURITY RULES
+
+### **Authentication**
+
+**✅ ALWAYS:**
+```typescript
+// Validate JWT on every protected route
+export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: 'UNAUTHORIZED' });
+  }
+  return next({ ctx: { user: ctx.user } });
+});
+
+// Verify project access before mutations
+const project = await prisma.project.findFirst({
+  where: {
+    id: input.projectId,
+    members: {
+      some: { userId: ctx.user.id },
+    },
+  },
+});
+
+if (!project) {
+  throw new TRPCError({ code: 'NOT_FOUND' });
+}
+```
+
+**❌ NEVER:**
+```typescript
+// No trusting client-provided user IDs
+const userId = input.userId; // ❌ Use ctx.user.id instead
+
+// No exposing sensitive data
+return {
+  user: {
+    id: user.id,
+    email: user.email,
+    githubToken: user.githubToken, // ❌ Never send tokens to client
+  },
+};
+```
+
+---
+
+### **Rate Limiting**
+
+**✅ ALWAYS:**
+```typescript
+// Rate limit expensive operations
+import rateLimit from 'express-rate-limit';
+
+const indexingLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // Max 5 indexing requests per hour
+  message: 'Too many indexing requests, please try again later',
+});
+
+app.post('/api/project/index', indexingLimiter, async (req, res) => {
+  // ...
+});
+```
+
+---
+
+### **Input Sanitization**
+
+**✅ ALWAYS:**
+```typescript
+// Validate and sanitize file paths
+function sanitizePath(filePath: string): string {
+  // Prevent directory traversal
+  if (filePath.includes('..') || filePath.startsWith('/')) {
+    throw new Error('Invalid file path');
+  }
+  return path.normalize(filePath);
+}
+
+// Validate GitHub URLs
+const githubUrlSchema = z.string().url().refine(
+  (url) => url.startsWith('https://github.com/'),
+  { message: 'Must be a GitHub repository URL' }
+);
+```
+
+---
+
+## 💰 COST OPTIMIZATION RULES
+
+### **AI API Usage**
+
+**✅ ALWAYS:**
+```typescript
+// Cache Q&A responses
+async function getAnswer(question: string, projectId: string) {
+  const cacheKey = `qa:${projectId}:${hash(question)}`;
+  
+  // Check cache first
+  const cached = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+  
+  // Generate answer
+  const answer = await generateAnswer(question, projectId);
+  
+  // Cache for 1 hour
+  await redis.set(cacheKey, JSON.stringify(answer), 'EX', 3600);
+  
+  return answer;
+}
+
+// Batch embedding requests
+const BATCH_SIZE = 96; // Cohere max
+for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+  const batch = texts.slice(i, i + BATCH_SIZE);
+  const embeddings = await cohere.embed({ texts: batch });
+  // ...
+}
+
+// Truncate context to save tokens
+const context = relevantFiles.slice(0, 5).map(f => 
+  f.content.slice(0, 1000) // Max 1K chars per file
+).join('\n\n');
+```
+
+**❌ NEVER:**
+```typescript
+// No embedding every single file individually
+for (const file of files) {
+  const embedding = await cohere.embed({ texts: [file.content] }); // ❌ Slow + expensive
+}
+
+// Batch instead:
+const embeddings = await cohere.embed({ texts: files.map(f => f.content) }); // ✅
+
+// No sending entire files to LLM
+const answer = await groq.chat({ messages: [{ role: 'user', content: fileContent }] }); // ❌
+```
+
+---
+
+### **Database Queries**
+
+**✅ ALWAYS:**
+```typescript
+// Use select to fetch only needed fields
+const projects = await prisma.project.findMany({
+  select: {
+    id: true,
+    name: true,
+    status: true,
+  },
+  // ❌ Don't fetch entire objects if you only need a few fields
+});
+
+// Paginate large datasets
+const projects = await prisma.project.findMany({
+  take: 20,
+  skip: page * 20,
+  orderBy: { createdAt: 'desc' },
+});
+```
+
+---
+
+## 📊 LOGGING & MONITORING
+
+### **Structured Logging**
+
+**✅ ALWAYS:**
+```typescript
+import pino from 'pino';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+});
+
+// Log with context
+logger.info({ userId, projectId }, 'Project indexing started');
+logger.error({ error: err, jobId: job.id }, 'Job failed');
+
+// Log slow queries
+const start = Date.now();
+const result = await prisma.project.findMany();
+const duration = Date.now() - start;
+
+if (duration > 1000) {
+  logger.warn({ duration, query: 'findManyProjects' }, 'Slow query detected');
+}
+```
+
+**❌ NEVER:**
+```typescript
+// No console.log in production
+console.log('User created'); // ❌
+
+// No logging sensitive data
+logger.info({ password: user.password }); // ❌
+logger.info({ githubToken: user.githubToken }); // ❌
+```
+
+---
+
+### **Error Tracking**
+
+**✅ ALWAYS:**
+```typescript
+import * as Sentry from '@sentry/node';
+
+Sentry.init({ dsn: process.env.SENTRY_DSN });
+
+try {
+  await processJob(job);
+} catch (error) {
+  Sentry.captureException(error, {
+    tags: { jobId: job.id, jobType: 'indexing' },
+    user: { id: userId },
+  });
+  throw error;
+}
+```
+
+---
+
+## 🧪 TESTING REQUIREMENTS
+
+### **Unit Tests (Vitest)**
+
+**✅ ALWAYS:**
+```typescript
+// Test pure functions
+describe('sanitizePath', () => {
+  it('should reject directory traversal', () => {
+    expect(() => sanitizePath('../etc/passwd')).toThrow();
+  });
+  
+  it('should normalize valid paths', () => {
+    expect(sanitizePath('src/index.js')).toBe('src/index.js');
+  });
+});
+
+// Mock external services
+vi.mock('../services/groq', () => ({
+  generateAnswer: vi.fn().mockResolvedValue('Mocked answer'),
+}));
+```
+
+---
+
+### **Integration Tests**
+
+**✅ ALWAYS:**
+```typescript
+// Test API endpoints
+describe('POST /api/project/create', () => {
+  it('should create project for authenticated user', async () => {
+    const response = await caller.project.create({
+      name: 'Test Project',
+    });
+    
+    expect(response).toMatchObject({
+      name: 'Test Project',
+      status: 'pending',
+    });
+  });
+  
+  it('should reject unauthenticated requests', async () => {
+    await expect(
+      unauthenticatedCaller.project.create({ name: 'Test' })
+    ).rejects.toThrow('UNAUTHORIZED');
+  });
+});
+```
+
+---
+
+## 🚀 DEPLOYMENT CHECKLIST
+
+Before deploying to production:
+
+**✅ Must Have:**
+- [ ] All environment variables set (see .env.example)
+- [ ] Database migrations applied (`npx prisma migrate deploy`)
+- [ ] Sentry DSN configured
+- [ ] Stripe webhook secret set
+- [ ] Health check endpoint returns 200
+- [ ] All tests passing
+- [ ] TypeScript compiles with no errors
+- [ ] Linter passes (no warnings)
+
+**⚠️ Should Have:**
+- [ ] Smoke tests run in staging
+- [ ] Load testing completed
+- [ ] Rollback plan documented
+- [ ] Monitoring alerts configured
+- [ ] Backup strategy verified
+
+---
+
+## 📋 FEATURE IMPLEMENTATION WORKFLOW
+
+When implementing a new feature, follow this order:
+
+1. **Update Prisma Schema** (if needed)
+   ```bash
+   # Add models to prisma/schema.prisma
+   npx prisma migrate dev --name add_feature_x
+   ```
+
+2. **Create tRPC Router** (backend)
+   ```typescript
+   // src/server/routers/featureX.ts
+   export const featureXRouter = router({ /* ... */ });
+   ```
+
+3. **Add to Main Router**
+   ```typescript
+   // src/server/routers/index.ts
+   export const appRouter = router({
+     // ...
+     featureX: featureXRouter,
+   });
+   ```
+
+4. **Create React Component** (frontend)
+   ```typescript
+   // src/components/FeatureX.tsx
+   export function FeatureX() { /* ... */ }
+   ```
+
+5. **Add Route**
+   ```typescript
+   // src/app/(dashboard)/feature-x/page.tsx
+   export default function FeatureXPage() {
+     return <FeatureX />;
+   }
+   ```
+
+6. **Write Tests**
+   ```typescript
+   // src/server/routers/featureX.test.ts
+   describe('featureXRouter', () => { /* ... */ });
+   ```
+
+7. **Update Documentation**
+   - Add to README if user-facing
+   - Update API docs if backend change
+
+---
+
+## 🔍 CODE REVIEW CHECKLIST
+
+Before submitting a PR, verify:
+
+**✅ Code Quality:**
+- [ ] No `any` types
+- [ ] No `console.log` statements
+- [ ] Proper error handling (`try/catch`)
+- [ ] Input validation (Zod schemas)
+- [ ] No hardcoded values (use env vars)
+
+**✅ Security:**
+- [ ] Authentication checks on protected routes
+- [ ] Input sanitization
+- [ ] No sensitive data in logs/responses
+- [ ] Rate limiting on expensive operations
+
+**✅ Performance:**
+- [ ] Database queries optimized (no N+1)
+- [ ] Caching implemented where appropriate
+- [ ] Large datasets paginated
+- [ ] API responses <200ms (p95)
+
+**✅ Testing:**
+- [ ] Unit tests for new functions
+- [ ] Integration tests for new endpoints
+- [ ] All tests passing (`npm test`)
+
+**✅ Documentation:**
+- [ ] Code comments for complex logic
+- [ ] JSDoc for public functions
+- [ ] README updated if user-facing change
+
+---
+
+## 🐛 DEBUGGING GUIDELINES
+
+### **Backend Issues**
+
+```bash
+# Check logs
+fly logs --app legacylens-api
+
+# Check worker logs
+fly logs --app legacylens-worker
+
+# Connect to production DB
+fly proxy 5432 -a legacylens-db
+psql postgresql://localhost:5432/legacylens
+
+# Check Redis
+fly redis connect
+
+# View Sentry errors
+https://sentry.io/organizations/legacylens/issues/
+```
+
+### **Frontend Issues**
+
+```bash
+# Check browser console
+# Open DevTools → Console → Network
+
+# Check React Query cache
+# Install React Query DevTools
+
+# Verify tRPC types
+npm run type-check
+```
+
+---
+
+## 📚 RECOMMENDED READING
+
+**Before starting development, read:**
+1. [Prisma Best Practices](https://www.prisma.io/docs/guides/performance-and-optimization)
+2. [tRPC Documentation](https://trpc.io/docs)
+3. [React Query Guide](https://tanstack.com/query/latest/docs/react)
+4. [Groq API Docs](https://console.groq.com/docs)
+5. [Cohere API Docs](https://docs.cohere.com/)
+
+---
+
+## 🎓 COMMON MISTAKES TO AVOID
+
+### **1. Not Using Transactions**
+❌ **Wrong:**
+```typescript
+await prisma.user.update({ where: { id }, data: { credits: 100 } });
+await prisma.usageLog.create({ data: { userId: id, action: 'purchase' } });
+```
+
+✅ **Correct:**
+```typescript
+await prisma.$transaction([
+  prisma.user.update({ where: { id }, data: { credits: 100 } }),
+  prisma.usageLog.create({ data: { userId: id, action: 'purchase' } }),
+]);
+```
+
+---
+
+### **2. Not Validating User Access**
+❌ **Wrong:**
+```typescript
+await prisma.project.delete({ where: { id: input.projectId } });
+```
+
+✅ **Correct:**
+```typescript
+const project = await prisma.project.findFirst({
+  where: {
+    id: input.projectId,
+    members: { some: { userId: ctx.user.id, role: 'owner' } },
+  },
+});
+
+if (!project) throw new TRPCError({ code: 'FORBIDDEN' });
+
+await prisma.project.delete({ where: { id: input.projectId } });
+```
+
+---
+
+### **3. Not Handling Async Errors**
+❌ **Wrong:**
+```typescript
+async function processJob(job) {
+  const data = await fetchData(); // Might throw
+  updateDatabase(data); // Might fail
+}
+```
+
+✅ **Correct:**
+```typescript
+async function processJob(job) {
+  try {
+    const data = await fetchData();
+    await updateDatabase(data);
+  } catch (error) {
+    logger.error({ error, jobId: job.id }, 'Job failed');
+    Sentry.captureException(error);
+    throw error;
+  }
+}
+```
+
+---
+
+## 🎯 CURSOR AI SPECIFIC INSTRUCTIONS
+
+When Cursor AI generates code for this project:
+
+1. **Always check existing code first** before generating new code
+2. **Follow the exact file structure** defined in this document
+3. **Use existing utilities** (don't reinvent the wheel)
+4. **Ask for clarification** if requirements are ambiguous
+5. **Generate tests** alongside implementation code
+6. **Update related files** (e.g., add router to main router file)
+
+**Example Cursor Prompt:**
+```
+Create a new feature for exporting project architecture as PDF.
+
+Steps:
+1. Add `exportArchitecture` procedure to projectRouter
+2. Create PDF generation service using jsPDF
+3. Add "Export PDF" button to architecture page
+4. Write integration test
+
+Use existing patterns from meeting.router.ts for file handling.
+```
+
+---
+
+## ✅ FINAL CHECKLIST FOR EVERY COMMIT
+
+Before committing code, run:
+
+```bash
+# Type check
+npm run type-check
+
+# Lint
+npm run lint
+
+# Format
+npm run format
+
+# Test
+npm test
+
+# Build (verify no errors)
+npm run build
+```
+
+**Git Commit Message Format:**
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Example:**
+```
+feat(qa): add streaming response for Q&A
+
+Implement Server-Sent Events to stream LLM responses chunk-by-chunk,
+improving perceived latency.
+
+Closes #42
+```
+
+**Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+---
+
+## 📞 SUPPORT & HELP
+
+**When stuck:**
+1. Check this RULES.txt file
+2. Read the relevant documentation (PRD, HLD, LLD)
+3. Search existing code for similar patterns
+4. Ask in Discord/Slack (if team collaboration)
+5. Create GitHub issue with detailed context
+
+**When reporting bugs:**
+- Include error message
+- Steps to reproduce
+- Expected vs actual behavior
+- Environment (local/staging/production)
+- Relevant logs (from Sentry/Betterstack)
+
+---
+
+## 🎉 SUCCESS CRITERIA
+
+**You've successfully followed these rules if:**
+
+✅ TypeScript compiles with zero errors  
+✅ All tests pass  
+✅ Linter shows no warnings  
+✅ Code follows project structure  
+✅ Security checks pass (no exposed secrets)  
+✅ Performance benchmarks met (<200ms API latency)  
+✅ Feature works end-to-end in local environment  
+
+---
+
+**VERSION:** 1.0  
+**LAST UPDATED:** February 10, 2026  
+**MAINTAINED BY:** Engineering Team
+
+---
+
+**🚀 Ready to build? Start with:**
+```bash
+git clone <repo>
+npm install
+docker-compose up -d  # Start Redis + Postgres
+npx prisma migrate dev
+npm run dev
+```
+
+**Open http://localhost:3000 and start coding!**
+
