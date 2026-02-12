@@ -8,7 +8,7 @@ import { PrismaClient } from '@prisma/client';
 import { transcribeAudio, extractMeetingInsights } from '../server/services/llm.js';
 import { generateEmbeddings } from '../server/services/embeddings.js';
 import { storeVectors } from '../server/services/search.js';
-import { downloadFromFirebase } from '../server/services/storage.js';
+import { downloadFromB2 } from '../server/services/storage.js';
 import { redisConnection, type TranscriptionJobData } from '../server/queues/index.js';
 import { logger } from '../server/trpc.js';
 import { v4 as uuid } from 'uuid';
@@ -33,7 +33,7 @@ const transcriptionWorker = new Worker<TranscriptionJobData>(
       // Step 1: Download audio file
       // ============================================================
       await job.updateProgress(10);
-      const audioBuffer = await downloadFromFirebase(fileUrl);
+      const audioBuffer = await downloadFromB2(fileUrl);
 
       // ============================================================
       // Step 2: Transcribe audio

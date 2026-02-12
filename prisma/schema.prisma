@@ -18,8 +18,8 @@ datasource db {
 // ============================================================
 
 model User {
-  id        String @id @default(uuid())
-  email     String @unique
+  id        String  @id @default(uuid())
+  email     String  @unique
   name      String?
   avatarUrl String? @map("avatar_url")
 
@@ -32,7 +32,7 @@ model User {
   githubUsername String? @map("github_username")
 
   // Billing
-  credits          Int    @default(1000)
+  credits          Int    @default(3000)
   subscriptionTier String @default("free") @map("subscription_tier") // free, pro, team, enterprise
 
   // Relations
@@ -41,6 +41,10 @@ model User {
   assignedCards   Card[]           @relation("AssignedCards")
   subscriptions   Subscription[]
   usageLogs       UsageLog[]
+  chatMembers     ChatMember[]
+  messages        Message[]
+  fileAssignments FileAssignment[]
+  benchmarkRuns   BenchmarkRun[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -77,10 +81,10 @@ model Project {
   githubPat String? @map("github_pat")
 
   // Indexing status
-  status         String @default("pending") // pending, indexing, complete, failed
-  totalFiles     Int    @default(0) @map("total_files")
-  processedFiles Int    @default(0) @map("processed_files")
-  totalLines     Int    @default(0) @map("total_lines")
+  status         String  @default("pending") // pending, indexing, complete, failed
+  totalFiles     Int     @default(0) @map("total_files")
+  processedFiles Int     @default(0) @map("processed_files")
+  totalLines     Int     @default(0) @map("total_lines")
   indexingError  String? @map("indexing_error")
 
   // Generated artifacts
@@ -96,12 +100,54 @@ model Project {
   meetings        Meeting[]
   boards          Board[]
   embeddings      Embedding[]
+  incidents       Incident[]
+  runbooks        ProjectRunbook[]
+  benchmarkSuites BenchmarkSuite[]
+  pullRequests    PullRequest[]
+  chatChannels    ChatChannel[]
+  fileAssignments FileAssignment[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status])
   @@map("projects")
+}
+
+// ============================================================
+// DEVOPS / INCIDENT (post-incident learning, runbooks)
+// ============================================================
+
+model Incident {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  summary      String   @db.Text
+  rootCause    String?  @map("root_cause") @db.Text
+  filesChanged String[] @map("files_changed")
+  resolution   String?  @db.Text
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@map("incidents")
+}
+
+model ProjectRunbook {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  rollbackSteps String?  @map("rollback_steps") @db.Text
+  hotfixSteps   String?  @map("hotfix_steps") @db.Text
+  envVars       String[] @map("env_vars") // List of env var names used
+  detectedAt    DateTime @default(now()) @map("detected_at")
+  lastUpdatedAt DateTime @updatedAt @map("last_updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId])
+  @@index([projectId])
+  @@map("project_runbooks")
 }
 
 // Many-to-many: Users <-> Projects
@@ -175,6 +221,9 @@ model Commit {
 
   // Files changed
   filesChanged String[] @map("files_changed")
+
+  // AI-generated one-line summary of the commit
+  summary String? @map("summary") @db.Text
 
   // Relations
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -311,7 +360,8 @@ model Card {
   timeSpentMinutes Int @default(0) @map("time_spent_minutes")
 
   // Relations
-  column Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  column       Column            @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  pullRequests CardPullRequest[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -374,8 +424,8 @@ model UsageLog {
 // ============================================================
 
 model Embedding {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
+  id        String @id @default(uuid())
+  projectId String @map("project_id")
 
   // Type: file | function | class | meeting_chunk
   type String
@@ -386,9 +436,9 @@ model Embedding {
   fileId   String? @map("file_id")
 
   // Meeting chunk fields
-  meetingId     String?  @map("meeting_id")
-  timestampStart Float?   @map("timestamp_start")
-  timestampEnd   Float?   @map("timestamp_end")
+  meetingId      String? @map("meeting_id")
+  timestampStart Float?  @map("timestamp_start")
+  timestampEnd   Float?  @map("timestamp_end")
 
   // Vector (1024 dimensions — Cohere embed-english-v3.0)
   embedding Unsupported("vector(1024)")?
@@ -401,4 +451,229 @@ model Embedding {
   @@index([projectId])
   @@index([type])
   @@map("embeddings")
+}
+
+// ============================================================
+// BENCHMARKS (Model + codebase evaluation)
+// ============================================================
+
+model BenchmarkSuite {
+  id          String @id @default(uuid())
+  projectId   String @map("project_id")
+  name        String
+  description String? @db.Text
+
+  // Relations
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cases   BenchmarkCase[]
+  runs    BenchmarkRun[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId])
+  @@map("benchmark_suites")
+}
+
+model BenchmarkCase {
+  id       String @id @default(uuid())
+  suiteId  String @map("suite_id")
+  name     String
+  prompt   String @db.Text
+
+  // Simple deterministic checks (MVP)
+  expectedKeywords  String[] @map("expected_keywords")
+  expectedFilePaths String[] @map("expected_file_paths")
+  minScore          Float    @default(0.6) @map("min_score") // 0..1
+
+  // Relations
+  suite   BenchmarkSuite   @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  results BenchmarkResult[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([suiteId])
+  @@map("benchmark_cases")
+}
+
+model BenchmarkRun {
+  id        String @id @default(uuid())
+  suiteId   String @map("suite_id")
+  userId    String @map("user_id")
+
+  // Execution metadata
+  modelName    String? @map("model_name")
+  temperature  Float?  @map("temperature")
+  maxTokens    Int?    @map("max_tokens")
+  aiTestMode   Boolean @default(false) @map("ai_test_mode")
+
+  status    String @default("queued") // queued, running, complete, failed
+  error     String? @db.Text
+  startedAt DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  // Aggregates
+  totalCases Int    @default(0) @map("total_cases")
+  passedCases Int   @default(0) @map("passed_cases")
+  averageScore Float @default(0) @map("average_score")
+  totalLatencyMs Int @default(0) @map("total_latency_ms")
+
+  // Relations
+  suite   BenchmarkSuite  @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  results BenchmarkResult[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([suiteId])
+  @@index([userId])
+  @@index([status])
+  @@map("benchmark_runs")
+}
+
+model BenchmarkResult {
+  id      String @id @default(uuid())
+  runId   String @map("run_id")
+  caseId  String @map("case_id")
+
+  score   Float  @default(0) // 0..1
+  passed  Boolean @default(false)
+  latencyMs Int  @default(0) @map("latency_ms")
+
+  // Captured outputs (for UI/debug)
+  answerText String? @map("answer_text") @db.Text
+  matchedKeywords  String[] @map("matched_keywords")
+  matchedFilePaths String[] @map("matched_file_paths")
+
+  // Relations
+  run  BenchmarkRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  case BenchmarkCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([runId, caseId])
+  @@index([runId])
+  @@index([caseId])
+  @@map("benchmark_results")
+}
+
+// ============================================================
+// TEAM COLLABORATION
+// ============================================================
+
+// Pull Requests (GitHub)
+model PullRequest {
+  id           String    @id @default(uuid())
+  projectId    String    @map("project_id")
+  githubPrId   String    @map("github_pr_id") // GitHub PR node ID (string)
+  title        String
+  body         String?   @db.Text
+  state        String // open, closed, merged
+  author       String // GitHub username
+  authorEmail  String?   @map("author_email")
+  baseBranch   String    @map("base_branch")
+  headBranch   String    @map("head_branch")
+  filesChanged String[]  @map("files_changed")
+  reviewers    String[] // GitHub usernames
+  mergedAt     DateTime? @map("merged_at")
+  createdAt    DateTime  @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cardLinks CardPullRequest[]
+
+  @@unique([projectId, githubPrId])
+  @@index([projectId])
+  @@index([state])
+  @@map("pull_requests")
+}
+
+// Chat Channels (Team & DM)
+model ChatChannel {
+  id        String  @id @default(uuid())
+  projectId String? @map("project_id") // null for DMs
+  type      String // "team" | "dm"
+  name      String? // null for DMs
+
+  project  Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members  ChatMember[]
+  messages Message[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId])
+  @@map("chat_channels")
+}
+
+model ChatMember {
+  id        String @id @default(uuid())
+  channelId String @map("channel_id")
+  userId    String @map("user_id")
+  role      String @default("member") // member, admin
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  channelId String   @map("channel_id")
+  userId    String   @map("user_id")
+  content   String   @db.Text
+  mentions  String[] // User IDs mentioned
+  replyToId String?  @map("reply_to_id") // Threading
+
+  channel ChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replyTo Message?    @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies Message[]   @relation("MessageReplies")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([channelId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// File Assignments
+model FileAssignment {
+  id         String @id @default(uuid())
+  projectId  String @map("project_id")
+  filePath   String @map("file_path")
+  userId     String @map("user_id")
+  assignedBy String @map("assigned_by") // User ID who assigned
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([projectId, filePath, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@map("file_assignments")
+}
+
+// Link PRs to Board Cards
+model CardPullRequest {
+  id     String @id @default(uuid())
+  cardId String @map("card_id")
+  prId   String @map("pr_id")
+
+  card        Card        @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  pullRequest PullRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([cardId, prId])
+  @@map("card_pull_requests")
 }

@@ -30,11 +30,14 @@ const RISK_ORDER = ['critical', 'high', 'medium', 'low'];
 export default function Architecture() {
   const { id: projectId } = useParams<{ id: string }>();
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFile, setSelectedFile] = useState<ProjectFile | null>(null);
+  const [fileContent, setFileContent] = useState<string>('');
 
   const { data, isLoading, error } = trpc.project.getArchitecture.useQuery(
     { projectId: projectId! },
     { enabled: !!projectId }
   );
+  const getFileContentMutation = trpc.project.getFileContent.useMutation();
 
   const files = (data?.files ?? []) as ProjectFile[];
   const techStack = data?.techStack as
@@ -178,30 +181,69 @@ export default function Architecture() {
                 </span>
               </div>
               <ul className="divide-y divide-border">
-                {items.map((f) => (
-                  <li
-                    key={f.id}
-                    className="flex items-center gap-4 px-4 py-3 text-sm hover:bg-muted/50"
-                  >
-                    <FileCode2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-mono" title={f.filePath}>
-                      {f.filePath}
-                    </span>
-                    <div className="flex shrink-0 items-center gap-3 text-muted-foreground">
-                      {f.isEntryPoint && (
-                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-                          entry
+                {items.map((f) => {
+                  const isSelected = selectedFile?.id === f.id;
+                  return (
+                    <li key={f.id} className="px-4 py-3 text-sm">
+                      <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-4 hover:bg-muted/50"
+                        onClick={async () => {
+                          if (!projectId) return;
+
+                          // Toggle off if same file clicked again
+                          if (isSelected) {
+                            setSelectedFile(null);
+                            setFileContent('');
+                            return;
+                          }
+
+                          setSelectedFile(f);
+                          setFileContent('');
+                          try {
+                            const res = await getFileContentMutation.mutateAsync({
+                              projectId,
+                              filePath: f.filePath,
+                            });
+                            setFileContent(res.content);
+                          } catch {
+                            setFileContent('// Failed to load file content from GitHub.');
+                          }
+                        }}
+                      >
+                        <FileCode2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-left" title={f.filePath}>
+                          {f.filePath}
                         </span>
+                        <div className="flex shrink-0 items-center gap-3 text-muted-foreground">
+                          {f.isEntryPoint && (
+                            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                              entry
+                            </span>
+                          )}
+                          <span title="Dependents">
+                            {formatNumber(f.dependentsCount)} deps
+                          </span>
+                          <span title="Dependencies">
+                            {formatNumber(f.dependenciesCount)} uses
+                          </span>
+                        </div>
+                      </button>
+
+                      {isSelected && (
+                        <div className="mt-2 rounded-md bg-muted/40 p-3">
+                          {getFileContentMutation.isPending && !fileContent ? (
+                            <p className="text-xs text-muted-foreground">Loading code…</p>
+                          ) : (
+                            <pre className="whitespace-pre text-xs font-mono">
+                              {fileContent || '// No content loaded.'}
+                            </pre>
+                          )}
+                        </div>
                       )}
-                      <span title="Dependents">
-                        {formatNumber(f.dependentsCount)} deps
-                      </span>
-                      <span title="Dependencies">
-                        {formatNumber(f.dependenciesCount)} uses
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           );
@@ -214,6 +256,7 @@ export default function Architecture() {
           <p className="mt-4">No files match your search</p>
         </div>
       )}
+
     </div>
   );
 }

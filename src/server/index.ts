@@ -12,7 +12,7 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
 import { appRouter } from './routers/index.js';
 import { createContext, getAuthUserFromToken, logger, prisma } from './trpc.js';
 import { transcriptionQueue } from './queues/index.js';
-import { uploadToFirebase } from './services/storage.js';
+import { uploadToB2 } from './services/storage.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
@@ -168,10 +168,10 @@ async function buildServer() {
         return reply.status(403).send({ error: 'Project access denied' });
       }
 
-      // Upload binary to Firebase Storage
+      // Upload binary to Backblaze B2
       const ext = path.extname(originalFilename) || '.mp3';
       const objectKey = `meetings/${projectId}/${randomUUID()}${ext}`;
-      const fileUrl = await uploadToFirebase(fileBuffer, objectKey, contentType);
+      const fileUrl = await uploadToB2(fileBuffer, objectKey, contentType);
 
       // Create meeting record and deduct credits
       const [meeting] = await prisma.$transaction([

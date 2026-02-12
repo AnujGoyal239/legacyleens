@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure, logger } from '../trpc.js';
 import { indexingQueue } from '../queues/index.js';
-import { parseGitHubUrl, fetchRepoMetadata } from '../services/github.js';
+import { parseGitHubUrl, fetchRepoMetadata, fetchFileContent } from '../services/github.js';
+import { generateCommitSummary } from '../services/llm.js';
 
 export const projectRouter = router({
   // List all projects for current user
@@ -95,7 +96,7 @@ export const projectRouter = router({
       });
 
       const limits: Record<string, number> = {
-        free: 1,
+        free: 3,
         pro: 10,
         team: 100,
         enterprise: 1000,
@@ -354,6 +355,78 @@ export const projectRouter = router({
       return project;
     }),
 
+  // GitLens-style: last commit that touched a file (blame)
+  getLastCommitForFile: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        filePath: z.string().min(1),
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      const project = await ctx.prisma.project.findFirst({
+        where: {
+          id: input.projectId,
+          members: { some: { userId: ctx.user.id } },
+        },
+      });
+      if (!project) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' });
+      }
+      const commit = await ctx.prisma.commit.findFirst({
+        where: {
+          projectId: input.projectId,
+          filesChanged: { has: input.filePath },
+        },
+        orderBy: { committedAt: 'desc' },
+      });
+      return { commit };
+    }),
+
+  // Generate AI summaries for commits that don't have one (fetch all commits with summary)
+  generateCommitSummaries: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        limit: z.number().min(1).max(50).default(20),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const project = await ctx.prisma.project.findFirst({
+        where: { id: input.projectId, members: { some: { userId: ctx.user.id } } },
+      });
+      if (!project) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' });
+      }
+
+      const commits = await ctx.prisma.commit.findMany({
+        where: { projectId: input.projectId },
+        orderBy: { committedAt: 'desc' },
+        take: input.limit,
+      });
+
+      let generated = 0;
+      for (const c of commits) {
+        try {
+          const existingSummary = (c as { summary?: string | null }).summary;
+          if (existingSummary != null && existingSummary !== '') continue;
+          const summary = await generateCommitSummary(c.message, c.filesChanged ?? []);
+          if (summary) {
+            await (ctx.prisma as any).commit.update({
+              where: { id: c.id },
+              data: { summary },
+            });
+            generated++;
+          }
+        } catch (err) {
+          logger.warn({ commitHash: c.commitHash, err }, 'Failed to generate commit summary');
+        }
+      }
+
+      logger.info({ projectId: input.projectId, generated, total: commits.length }, 'Commit summaries generated');
+      return { generated, total: commits.length };
+    }),
+
   // Get architecture graph
   getArchitecture: protectedProcedure
     .input(z.object({ projectId: z.string().uuid() }))
@@ -392,6 +465,73 @@ export const projectRouter = router({
         entryPoints: project.entryPoints,
         files: project.files,
       };
+    }),
+
+  // Get raw source code for a file (from GitHub)
+  // Note: implemented as a mutation so the client can call it on-demand (per click)
+  getFileContent: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        filePath: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const project = await ctx.prisma.project.findFirst({
+        where: {
+          id: input.projectId,
+          members: { some: { userId: ctx.user.id } },
+        },
+        select: {
+          githubUrl: true,
+          defaultBranch: true,
+          githubPat: true,
+          repoOwner: true,
+          repoName: true,
+        },
+      });
+
+      if (!project || !project.githubUrl) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Project does not have a GitHub repository connected.',
+        });
+      }
+
+      const owner = project.repoOwner;
+      const repo = project.repoName;
+
+      // Fallback: parse from URL if metadata missing
+      let finalOwner = owner;
+      let finalRepo = repo;
+      if (!finalOwner || !finalRepo) {
+        const parsed = parseGitHubUrl(project.githubUrl);
+        if (!parsed) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Invalid GitHub URL for project.',
+          });
+        }
+        finalOwner = parsed.owner;
+        finalRepo = parsed.repo;
+      }
+
+      const content = await fetchFileContent(
+        finalOwner!,
+        finalRepo!,
+        input.filePath,
+        project.defaultBranch || 'main',
+        project.githubPat
+      );
+
+      if (!content) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'File content not found in GitHub repository.',
+        });
+      }
+
+      return { content };
     }),
 
   // Delete project

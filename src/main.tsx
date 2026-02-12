@@ -19,7 +19,7 @@ if (!publishableKey) {
 function TrpcProviderWithClerk() {
   const { getToken } = useAuth();
   const trpcClient = React.useMemo(
-    () => createTrpcClient(() => getToken({ template: 'default' })),
+    () => createTrpcClient(() => getToken()),
     [getToken]
   );
   return (
@@ -35,7 +35,10 @@ function TrpcProviderWithClerk() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ClerkProvider publishableKey={publishableKey || ''}>
+    <ClerkProvider
+      publishableKey={publishableKey || ''}
+      afterSignOutUrl="/login"
+    >
       <TrpcProviderWithClerk />
     </ClerkProvider>
   </React.StrictMode>

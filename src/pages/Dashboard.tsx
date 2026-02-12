@@ -8,6 +8,7 @@ import {
   Plus, Search, FolderGit2, Clock, FileCode2, GitBranch,
   Star, Lock, Globe, Eye, EyeOff, Loader2, AlertCircle,
 } from 'lucide-react';
+import { useAuth } from '@clerk/clerk-react';
 import { trpc } from '@/lib/trpc';
 import { getStatusInfo, formatRelativeTime, cn } from '@/lib/utils';
 
@@ -29,6 +30,7 @@ function ProjectCardSkeleton() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { isLoaded: clerkLoaded } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -38,7 +40,9 @@ export default function Dashboard() {
   const [showPat, setShowPat] = useState(false);
 
   const utils = trpc.useUtils();
-  const { data: projects, isLoading } = trpc.project.list.useQuery();
+  const { data: projects, isLoading } = trpc.project.list.useQuery(undefined, {
+    enabled: clerkLoaded,
+  });
   const createMutation = trpc.project.create.useMutation({
     onSuccess: (project) => {
       setCreateOpen(false);

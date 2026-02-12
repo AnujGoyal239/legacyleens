@@ -25,15 +25,30 @@ export const queryClient = new QueryClient({
   },
 });
 
+const getTrpcUrl = () => {
+  const base = import.meta.env.VITE_API_URL;
+  if (base && typeof window !== 'undefined') return `${base.replace(/\/$/, '')}/trpc`;
+  return '/trpc';
+};
+
 // Create tRPC client with Clerk getToken (call from component that has useAuth())
 export function createTrpcClient(getToken: () => Promise<string | null>) {
   return trpc.createClient({
     links: [
       httpBatchLink({
-        url: '/trpc',
+        url: getTrpcUrl(),
         transformer: superjson,
+        fetch(url, options) {
+          return fetch(url, {
+            ...options,
+            credentials: 'include',
+          });
+        },
         async headers() {
           const token = await getToken();
+          if (import.meta.env.DEV && !token) {
+            console.warn('[LegacyLens] No auth token — getToken() returned null. Sign out and sign in again if you see 401s.');
+          }
           if (!token) return {};
           return {
             Authorization: `Bearer ${token}`,

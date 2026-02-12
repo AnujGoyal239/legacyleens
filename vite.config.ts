@@ -24,6 +24,13 @@ export default defineConfig({
       '/trpc': {
         target: process.env.API_URL || 'http://localhost:3000',
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            const headers = req.headers as Record<string, string | undefined>;
+            if (headers.authorization) proxyReq.setHeader('Authorization', headers.authorization);
+            if (headers['x-access-token']) proxyReq.setHeader('x-access-token', headers['x-access-token']);
+          });
+        },
       },
       '/uploads': {
         target: process.env.API_URL || 'http://localhost:3000',

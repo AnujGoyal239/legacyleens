@@ -337,6 +337,35 @@ export default function Meetings() {
               End meeting & get summary
             </button>
           </div>
+          {/* Jitsi Meet embed — share the room link so others can join */}
+          {(() => {
+            const jitsiRoom = `LegacyLens${liveMeetingId.replace(/-/g, '')}`;
+            const jitsiUrl = `https://meet.jit.si/${jitsiRoom}`;
+            return (
+              <div className="mt-3 rounded-md border border-border bg-background overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50">
+                  <span>Video call (Jitsi) — share the room link with participants</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(jitsiUrl);
+                    }}
+                    className="rounded border border-border px-2 py-1 hover:bg-muted text-foreground"
+                  >
+                    Copy room link
+                  </button>
+                </div>
+                <div className="relative h-[320px] w-full min-w-0">
+                  <iframe
+                    title="Jitsi Meet"
+                    src={`${jitsiUrl}?config.startWithAudioMuted=false&config.startWithVideoMuted=false`}
+                    allow="camera; microphone; fullscreen; display-capture"
+                    className="absolute inset-0 h-full w-full border-0"
+                  />
+                </div>
+              </div>
+            );
+          })()}
           <div className="mt-3 rounded-md border border-border bg-background p-3">
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">Live transcript (speak to capture)</p>
             <div className="max-h-40 overflow-y-auto text-sm text-foreground whitespace-pre-wrap">

@@ -1,107 +1,143 @@
 // ============================================================
-// LegacyLens — File Storage Service (Firebase Storage)
+// LegacyLens — File Storage Service (Backblaze B2)
 // ============================================================
 
-import admin from 'firebase-admin';
+import crypto from 'crypto';
 import { logger } from '../trpc.js';
 
-// Firebase configuration (service account via env)
-const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
-const FIREBASE_CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
-const FIREBASE_PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY
-  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-  : undefined;
-const FIREBASE_STORAGE_BUCKET =
-  process.env.FIREBASE_STORAGE_BUCKET || (FIREBASE_PROJECT_ID ? `${FIREBASE_PROJECT_ID}.appspot.com` : '');
+const B2_KEY_ID = process.env.B2_KEY_ID;
+const B2_APPLICATION_KEY = process.env.B2_APPLICATION_KEY;
+const B2_BUCKET_NAME = process.env.B2_BUCKET_NAME;
+const B2_BUCKET_ID = process.env.B2_BUCKET_ID;
 
-// Initialize Firebase Admin app (singleton)
-if (!admin.apps.length && FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: FIREBASE_PROJECT_ID,
-      clientEmail: FIREBASE_CLIENT_EMAIL,
-      privateKey: FIREBASE_PRIVATE_KEY,
-    }),
-    storageBucket: FIREBASE_STORAGE_BUCKET,
-  });
-} else if (!admin.apps.length) {
+if (!B2_KEY_ID || !B2_APPLICATION_KEY || !B2_BUCKET_NAME || !B2_BUCKET_ID) {
   logger.warn(
-    'Firebase credentials are missing. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, and FIREBASE_STORAGE_BUCKET.'
+    'Backblaze B2 credentials are missing. Set B2_KEY_ID, B2_APPLICATION_KEY, B2_BUCKET_NAME, and B2_BUCKET_ID in .env.'
   );
 }
 
-const bucket = admin.apps.length ? admin.storage().bucket() : null;
+type B2Auth = {
+  authorizationToken: string;
+  apiUrl: string;
+  downloadUrl: string;
+  accountId: string;
+};
+
+type B2UploadUrl = {
+  uploadUrl: string;
+  authorizationToken: string;
+};
+
+let cachedAuth: B2Auth | null = null;
+let cachedUpload: B2UploadUrl | null = null;
+
+function requireB2Env() {
+  if (!B2_KEY_ID || !B2_APPLICATION_KEY || !B2_BUCKET_NAME || !B2_BUCKET_ID) {
+    throw new Error('Backblaze B2 is not configured. Missing B2_* env vars.');
+  }
+}
+
+async function b2AuthorizeAccount(): Promise<B2Auth> {
+  requireB2Env();
+  const basic = Buffer.from(`${B2_KEY_ID}:${B2_APPLICATION_KEY}`).toString('base64');
+  const res = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
+    method: 'GET',
+    headers: {
+      Authorization: `Basic ${basic}`,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`B2 authorize failed (${res.status}): ${text || res.statusText}`);
+  }
+  const json = (await res.json()) as B2Auth;
+  return json;
+}
+
+async function b2GetUploadUrl(auth: B2Auth): Promise<B2UploadUrl> {
+  requireB2Env();
+  const res = await fetch(`${auth.apiUrl}/b2api/v2/b2_get_upload_url`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth.authorizationToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ bucketId: B2_BUCKET_ID }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`B2 get_upload_url failed (${res.status}): ${text || res.statusText}`);
+  }
+  return (await res.json()) as B2UploadUrl;
+}
+
+async function getB2UploadTarget(): Promise<{ auth: B2Auth; upload: B2UploadUrl }> {
+  if (!cachedAuth) cachedAuth = await b2AuthorizeAccount();
+  if (!cachedUpload) cachedUpload = await b2GetUploadUrl(cachedAuth);
+  return { auth: cachedAuth, upload: cachedUpload };
+}
+
+function fileUrlFromDownloadUrl(downloadUrl: string, fileName: string) {
+  // B2 "file" URLs keep path separators as `/` in the URL path.
+  const encoded = encodeURIComponent(fileName).replace(/%2F/g, '/');
+  return `${downloadUrl}/file/${B2_BUCKET_NAME}/${encoded}`;
+}
 
 /**
- * Upload a file to Firebase Storage.
- * Returns a public HTTPS URL to the object.
+ * Upload a file to Backblaze B2.
+ * Returns a public HTTPS URL (bucket must allow public file downloads).
  */
-export async function uploadToFirebase(
+export async function uploadToB2(
   fileBuffer: Buffer,
-  filePath: string,
+  fileName: string,
   contentType: string = 'application/octet-stream'
 ): Promise<string> {
-  if (!bucket) {
-    throw new Error('Firebase Storage bucket is not initialized');
-  }
+  requireB2Env();
 
-  const file = bucket.file(filePath);
-  await file.save(fileBuffer, {
-    contentType,
-    resumable: false,
-    public: true,
+  const sha1 = crypto.createHash('sha1').update(fileBuffer).digest('hex');
+  const { auth, upload } = await getB2UploadTarget();
+
+  const res = await fetch(upload.uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: upload.authorizationToken,
+      'X-Bz-File-Name': encodeURIComponent(fileName),
+      'Content-Type': contentType,
+      'Content-Length': String(fileBuffer.length),
+      'X-Bz-Content-Sha1': sha1,
+    },
+    body: new Uint8Array(fileBuffer),
   });
 
-  const encodedPath = encodeURIComponent(filePath);
-  const url = `https://storage.googleapis.com/${bucket.name}/${encodedPath}`;
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    // If upload URL/token is stale, clear cache and surface error.
+    cachedUpload = null;
+    throw new Error(`B2 upload failed (${res.status}): ${text || res.statusText}`);
+  }
 
-  logger.info({ filePath, size: fileBuffer.length, url }, 'File uploaded to Firebase Storage');
-
+  const url = fileUrlFromDownloadUrl(auth.downloadUrl, fileName);
+  logger.info({ fileName, size: fileBuffer.length, url }, 'File uploaded to Backblaze B2');
   return url;
 }
 
 /**
- * Download a file from Firebase / public URL via HTTP.
+ * Download a file from B2 (via a public URL).
  */
-export async function downloadFromFirebase(fileUrl: string): Promise<Buffer> {
-  try {
-    const response = await fetch(fileUrl);
-
-    if (!response.ok) {
-      throw new Error(`Failed to download file: ${response.statusText}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (error) {
-    logger.error({ error, fileUrl }, 'Failed to download file from Firebase Storage');
-    throw error;
+export async function downloadFromB2(fileUrl: string): Promise<Buffer> {
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download file (${response.status}): ${response.statusText}`);
   }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 /**
- * Placeholder for generating upload URLs (not used in current flow).
+ * Delete a file from B2.
+ * (Optional; not used in MVP. Implement later via b2_delete_file_version.)
  */
-export async function getUploadUrl(
-  filePath: string,
-  contentType: string = 'audio/mpeg',
-  expiresIn: number = 3600
-): Promise<{ url: string; fields: Record<string, string> }> {
-  void expiresIn;
-  return {
-    url: `https://storage.googleapis.com/${FIREBASE_STORAGE_BUCKET}`,
-    fields: {
-      key: filePath,
-      'Content-Type': contentType,
-    },
-  };
-}
-
-/**
- * Delete a file from Firebase.
- * (MVP: just logs — safe no-op. Can be implemented with file.delete() later.)
- */
-export async function deleteFromFirebase(filePath: string): Promise<void> {
-  logger.info({ filePath }, 'File deleted from Firebase Storage (noop/mocked)');
+export async function deleteFromB2(fileName: string): Promise<void> {
+  logger.info({ fileName }, 'deleteFromB2 is not implemented yet (noop)');
 }
 

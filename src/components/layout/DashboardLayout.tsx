@@ -11,6 +11,11 @@ import {
   LayoutGrid,
   Mic,
   User,
+  ShieldAlert,
+  GitCommit,
+  BookOpen,
+  LineChart,
+  Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser } from '@clerk/clerk-react';
@@ -20,7 +25,13 @@ const projectNavItems = [
   { to: 'architecture', label: 'Architecture', icon: Code2, end: false },
   { to: 'qa', label: 'Q&A', icon: MessageSquare, end: false },
   { to: 'board', label: 'Board', icon: LayoutGrid, end: false },
+  { to: 'team', label: 'Team', icon: Users, end: false },
+  { to: 'chat', label: 'Chat', icon: MessageSquare, end: false },
   { to: 'meetings', label: 'Meetings', icon: Mic, end: false },
+  { to: 'devops', label: 'DevOps', icon: ShieldAlert, end: false },
+  { to: 'history', label: 'History', icon: GitCommit, end: false },
+  { to: 'documentation', label: 'Documentation', icon: BookOpen, end: false },
+  { to: 'insights', label: 'Insights', icon: LineChart, end: false },
 ];
 
 export default function DashboardLayout() {

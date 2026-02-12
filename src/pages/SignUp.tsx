@@ -1,11 +1,11 @@
 // ============================================================
-// LegacyLens — Login Page (Clerk)
+// LegacyLens — Sign Up Page (Clerk)
 // ============================================================
 
-import { SignIn } from '@clerk/clerk-react';
+import { SignUp as ClerkSignUp } from '@clerk/clerk-react';
 import { Link } from 'react-router-dom';
 
-export default function Login() {
+export default function SignUp() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
       <div className="mb-6">
@@ -15,11 +15,11 @@ export default function Login() {
           </span>
         </Link>
       </div>
-      <SignIn
+      <ClerkSignUp
         routing="path"
-        path="/login"
-        signUpUrl="/sign-up"
-        afterSignInUrl="/dashboard"
+        path="/sign-up"
+        signInUrl="/login"
+        afterSignUpUrl="/dashboard"
       />
       <p className="mt-6 text-center text-sm text-slate-600">
         <Link to="/" className="font-medium text-primary hover:underline">

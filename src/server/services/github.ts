@@ -80,7 +80,23 @@ export async function fetchRepoMetadata(
     throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as {
+    owner?: { login?: string; avatar_url?: string };
+    name?: string;
+    full_name?: string;
+    description?: string | null;
+    private?: boolean;
+    default_branch?: string;
+    topics?: string[];
+    html_url?: string;
+    created_at?: string;
+    updated_at?: string;
+    stargazers_count?: number;
+    forks_count?: number;
+    language?: string | null;
+    size?: number;
+    open_issues_count?: number;
+  };
 
   return {
     owner: data.owner?.login || owner,
@@ -95,8 +111,8 @@ export async function fetchRepoMetadata(
     topics: data.topics || [],
     avatarUrl: data.owner?.avatar_url || null,
     htmlUrl: data.html_url || `https://github.com/${owner}/${repo}`,
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
+    createdAt: data.created_at ?? '',
+    updatedAt: data.updated_at ?? '',
     size: data.size || 0,
     openIssues: data.open_issues_count || 0,
   };
@@ -256,6 +272,39 @@ export async function getCommitHistory(
     date: new Date(entry.date),
     filesChanged: [], // Could be expanded with diff-tree
   }));
+}
+
+/**
+ * Fetch raw file content from GitHub (Contents API).
+ * Returns null if file not found or not a file.
+ */
+export async function fetchFileContent(
+  owner: string,
+  repo: string,
+  filePath: string,
+  ref: string = 'main',
+  pat?: string | null
+): Promise<string | null> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'LegacyLens/1.0',
+  };
+  if (pat) headers.Authorization = `Bearer ${pat}`;
+
+  const pathEnc = encodeURIComponent(filePath);
+  const refEnc = encodeURIComponent(ref);
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${pathEnc}?ref=${refEnc}`;
+  const response = await fetch(url, { headers });
+
+  if (response.status === 404 || !response.ok) return null;
+
+  const data = (await response.json()) as { content?: string; encoding?: string; type?: string };
+  if (data.type !== 'file' || !data.content) return null;
+  if (data.encoding === 'base64') {
+    return Buffer.from(data.content, 'base64').toString('utf-8');
+  }
+  return data.content;
 }
 
 /**

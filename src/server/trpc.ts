@@ -117,16 +117,23 @@ export async function getAuthUserFromToken(token: string | undefined): Promise<U
       logger.info({ userId: dbUser.id, clerkId }, 'User created from Clerk (no API)');
     }
     return dbUser;
-  } catch {
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : err }, 'getAuthUserFromToken failed');
     return null;
   }
 }
 
 // Create context for each request (Clerk JWT → our DB user)
 export async function createContext({ req, res }: CreateFastifyContextOptions): Promise<Context> {
+  const authHeader = req.headers.authorization ?? req.headers['authorization'];
+  const xToken = req.headers['x-access-token'] as string | undefined;
   const token =
-    req.headers.authorization?.replace(/^Bearer\s+/i, '').trim() ||
-    (req.headers['x-access-token'] as string | undefined)?.trim();
+    (typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/i, '').trim() : '') ||
+    xToken?.trim();
+
+  if (!token && (req.url?.includes('/trpc') ?? false)) {
+    logger.info('tRPC request with no auth token — check client is sending Authorization or x-access-token');
+  }
 
   const user = await getAuthUserFromToken(token);
 

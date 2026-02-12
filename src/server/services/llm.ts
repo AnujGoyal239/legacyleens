@@ -116,6 +116,37 @@ export async function* generateAnswerStream(
 }
 
 /**
+ * Generate a one-line summary of a git commit (for commit history / GitLens-style)
+ */
+export async function generateCommitSummary(message: string, filesChanged: string[]): Promise<string> {
+  const filesStr = filesChanged.length ? filesChanged.slice(0, 15).join(', ') : 'no files';
+  const prompt = `Summarize this git commit in one short sentence (max 15 words). Focus on what changed and why it matters.
+
+Commit message: ${message}
+Files changed: ${filesStr}${filesChanged.length > 15 ? ' (and more)' : ''}
+
+Reply with only the summary sentence, no quotes.`;
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: LLM_MODEL,
+      messages: [
+        { role: 'system', content: 'You are a commit summarizer. Reply with one short sentence only.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 80,
+    });
+
+    const summary = completion.choices[0]?.message?.content?.trim() || '';
+    return summary.slice(0, 500);
+  } catch (error) {
+    logger.warn({ error }, 'Commit summary generation failed');
+    return '';
+  }
+}
+
+/**
  * Generate a short summary of a meeting transcript
  */
 export async function generateMeetingSummary(transcript: string): Promise<string> {
