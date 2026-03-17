@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Upload,
   Mic,
@@ -18,6 +18,10 @@ import {
   AlertCircle,
   Radio,
   Square,
+  Video,
+  Calendar,
+  ExternalLink,
+  Unplug,
 } from 'lucide-react';
 import { useAuth } from '@clerk/clerk-react';
 import { trpc } from '@/lib/trpc';
@@ -90,7 +94,7 @@ export default function Meetings() {
   const { getToken } = useAuth();
   const navigate = useNavigate();
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadTab, setUploadTab] = useState<'file' | 'url' | 'live'>('file');
+  const [uploadTab, setUploadTab] = useState<'file' | 'url' | 'live' | 'google'>('file');
   const [uploadUrl, setUploadUrl] = useState('');
   const [uploadTitle, setUploadTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -105,6 +109,46 @@ export default function Meetings() {
   const [liveStartTime, setLiveStartTime] = useState<number | null>(null);
   const [liveEnding, setLiveEnding] = useState(false);
   const recognitionRef = useRef<{ start: () => void; stop: () => void } | null>(null);
+
+  // Google Meet state
+  const [scheduleTitle, setScheduleTitle] = useState('');
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [scheduleDuration, setScheduleDuration] = useState(30);
+  const [scheduleEmails, setScheduleEmails] = useState('');
+
+  const { data: googleStatus } = trpc.googleMeet.status.useQuery(undefined, { retry: false });
+  const { data: googleAuthUrl } = trpc.googleMeet.getAuthUrl.useQuery(undefined, {
+    enabled: googleStatus?.configured === true && !googleStatus?.connected,
+    retry: false,
+  });
+  const scheduleMutation = trpc.googleMeet.schedule.useMutation({
+    onSuccess: () => {
+      setScheduleTitle('');
+      setScheduleDate('');
+      setScheduleTime('');
+      setScheduleDuration(30);
+      setScheduleEmails('');
+      setShowUpload(false);
+      utils.meeting.list.invalidate();
+    },
+  });
+
+  const handleScheduleGoogleMeet = () => {
+    if (!projectId || !scheduleTitle.trim() || !scheduleDate || !scheduleTime) return;
+    const startTime = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+    const attendeeEmails = scheduleEmails
+      .split(',')
+      .map((e) => e.trim())
+      .filter((e) => e.includes('@'));
+    scheduleMutation.mutate({
+      projectId,
+      title: scheduleTitle.trim(),
+      startTime,
+      durationMinutes: scheduleDuration,
+      attendeeEmails: attendeeEmails.length > 0 ? attendeeEmails : undefined,
+    });
+  };
 
   const startSpeechRecognition = () => {
     if (!SpeechRecognitionAPI) return;
@@ -294,6 +338,16 @@ export default function Meetings() {
           <h1 className="text-xl font-semibold">Meetings</h1>
         </div>
         <div className="flex items-center gap-2">
+          {googleStatus?.configured && (
+            <button
+              type="button"
+              onClick={() => { setShowUpload(true); setUploadTab('google'); }}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-500 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-700 transition hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+            >
+              <Video className="h-4 w-4" />
+              Schedule Google Meet
+            </button>
+          )}
           <button
             type="button"
             onClick={() => { setShowUpload(true); setUploadTab('live'); }}
@@ -337,35 +391,11 @@ export default function Meetings() {
               End meeting & get summary
             </button>
           </div>
-          {/* Jitsi Meet embed — share the room link so others can join */}
-          {(() => {
-            const jitsiRoom = `LegacyLens${liveMeetingId.replace(/-/g, '')}`;
-            const jitsiUrl = `https://meet.jit.si/${jitsiRoom}`;
-            return (
-              <div className="mt-3 rounded-md border border-border bg-background overflow-hidden">
-                <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50">
-                  <span>Video call (Jitsi) — share the room link with participants</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(jitsiUrl);
-                    }}
-                    className="rounded border border-border px-2 py-1 hover:bg-muted text-foreground"
-                  >
-                    Copy room link
-                  </button>
-                </div>
-                <div className="relative h-[320px] w-full min-w-0">
-                  <iframe
-                    title="Jitsi Meet"
-                    src={`${jitsiUrl}?config.startWithAudioMuted=false&config.startWithVideoMuted=false`}
-                    allow="camera; microphone; fullscreen; display-capture"
-                    className="absolute inset-0 h-full w-full border-0"
-                  />
-                </div>
-              </div>
-            );
-          })()}
+          <div className="mt-3 rounded-md border border-border bg-background p-3">
+            <p className="text-sm text-muted-foreground">
+              Use Google Meet or your preferred video call tool alongside this live transcript capture.
+            </p>
+          </div>
           <div className="mt-3 rounded-md border border-border bg-background p-3">
             <p className="mb-1.5 text-xs font-medium text-muted-foreground">Live transcript (speak to capture)</p>
             <div className="max-h-40 overflow-y-auto text-sm text-foreground whitespace-pre-wrap">
@@ -432,6 +462,19 @@ export default function Meetings() {
               <Radio className="h-4 w-4" />
               Live Meeting
             </button>
+            {googleStatus?.configured && (
+              <button
+                type="button"
+                onClick={() => setUploadTab('google')}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition',
+                  uploadTab === 'google' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Video className="h-4 w-4" />
+                Google Meet
+              </button>
+            )}
           </div>
 
           <div className="mt-4 space-y-3">
@@ -541,8 +584,130 @@ export default function Meetings() {
               </div>
             )}
 
-            {/* Title field (shared) */}
-            <div>
+            {/* GOOGLE MEET TAB */}
+            {uploadTab === 'google' && (
+              <div className="space-y-3">
+                {!googleStatus?.connected ? (
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <Video className="h-10 w-10 text-blue-500" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      Connect your Google account to schedule meetings with Google Meet links.
+                    </p>
+                    {googleAuthUrl?.url ? (
+                      <a
+                        href={googleAuthUrl.url}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Connect Google Account
+                      </a>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Loading...</p>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                        <CheckCircle className="h-4 w-4" />
+                        Google account connected
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">Meeting title</label>
+                      <input
+                        type="text"
+                        value={scheduleTitle}
+                        onChange={(e) => setScheduleTitle(e.target.value)}
+                        placeholder="Sprint planning"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1.5 block text-sm text-muted-foreground">Date</label>
+                        <input
+                          type="date"
+                          value={scheduleDate}
+                          onChange={(e) => setScheduleDate(e.target.value)}
+                          min={new Date().toISOString().split('T')[0]}
+                          className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm text-muted-foreground">Time</label>
+                        <input
+                          type="time"
+                          value={scheduleTime}
+                          onChange={(e) => setScheduleTime(e.target.value)}
+                          className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">Duration (minutes)</label>
+                      <select
+                        value={scheduleDuration}
+                        onChange={(e) => setScheduleDuration(Number(e.target.value))}
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value={15}>15 min</option>
+                        <option value={30}>30 min</option>
+                        <option value={45}>45 min</option>
+                        <option value={60}>1 hour</option>
+                        <option value={90}>1.5 hours</option>
+                        <option value={120}>2 hours</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">Invite attendees (comma-separated emails)</label>
+                      <input
+                        type="text"
+                        value={scheduleEmails}
+                        onChange={(e) => setScheduleEmails(e.target.value)}
+                        placeholder="alice@example.com, bob@example.com"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleScheduleGoogleMeet}
+                      disabled={!scheduleTitle.trim() || !scheduleDate || !scheduleTime || scheduleMutation.isPending}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {scheduleMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                      <Calendar className="h-4 w-4" />
+                      Schedule Meeting
+                    </button>
+                    {scheduleMutation.error && (
+                      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                        <p className="text-sm text-destructive">{scheduleMutation.error.message}</p>
+                      </div>
+                    )}
+                    {scheduleMutation.data && (
+                      <div className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950">
+                        <p className="text-sm font-medium text-green-700 dark:text-green-300">Meeting scheduled!</p>
+                        <a
+                          href={scheduleMutation.data.meetLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                        >
+                          <Video className="h-3.5 w-3.5" />
+                          Join Google Meet
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Title field (shared for file/url tabs) */}
+            {(uploadTab === 'file' || uploadTab === 'url') && (
+              <div>
               <label className="mb-1.5 block text-sm text-muted-foreground">Title (optional)</label>
               <input
                 type="text"
@@ -551,47 +716,48 @@ export default function Meetings() {
                 placeholder="Sprint planning"
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
-            </div>
+              </div>
 
-            {/* Error */}
-            {(fileError || uploadMutation.error) && (
-              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-                <p className="text-sm text-destructive">{fileError || uploadMutation.error?.message}</p>
+              {/* Error */}
+              {(fileError || uploadMutation.error) && (
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                  <p className="text-sm text-destructive">{fileError || uploadMutation.error?.message}</p>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-1">
+                {uploadTab === 'file' ? (
+                  <button
+                    type="button"
+                    onClick={handleFileUpload}
+                    disabled={!selectedFile || fileUploading}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {fileUploading && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {fileUploading ? 'Uploading...' : 'Upload File'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleUrlUpload as () => void}
+                    disabled={uploadMutation.isPending || !uploadUrl.trim()}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {uploadMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {uploadMutation.isPending ? 'Uploading...' : 'Upload from URL'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-lg border border-input px-4 py-2.5 text-sm font-medium hover:bg-muted"
+                >
+                  Cancel
+                </button>
               </div>
             )}
-
-            {/* Action buttons */}
-            <div className="flex gap-2 pt-1">
-              {uploadTab === 'file' ? (
-                <button
-                  type="button"
-                  onClick={handleFileUpload}
-                  disabled={!selectedFile || fileUploading}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {fileUploading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {fileUploading ? 'Uploading...' : 'Upload File'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleUrlUpload as () => void}
-                  disabled={uploadMutation.isPending || !uploadUrl.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {uploadMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {uploadMutation.isPending ? 'Uploading...' : 'Upload from URL'}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-lg border border-input px-4 py-2.5 text-sm font-medium hover:bg-muted"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -631,6 +797,12 @@ export default function Meetings() {
                 <div className="flex items-center gap-2 shrink-0">
                   {(m as { source?: string }).source === 'live' && (
                     <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Live</span>
+                  )}
+                  {(m as { source?: string }).source === 'google_meet' && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      <Video className="h-3 w-3" />
+                      Google Meet
+                    </span>
                   )}
                   <StatusBadge status={m.transcriptionStatus as 'pending' | 'processing' | 'complete' | 'failed' | 'live'} />
                 </div>

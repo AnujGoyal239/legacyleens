@@ -220,12 +220,70 @@ async function buildServer() {
     }
   });
 
+  // Google OAuth callback — exchanges code for tokens and redirects back to the app
+  fastify.get('/api/google/callback', async (request, reply) => {
+    try {
+      const { code, state } = request.query as { code?: string; state?: string };
+      if (!code) {
+        return reply.status(400).send({ error: 'Missing authorization code' });
+      }
+      // state contains the userId set when generating the auth URL
+      const userId = state;
+      if (!userId) {
+        return reply.status(400).send({ error: 'Missing state parameter' });
+      }
+
+      const { exchangeCodeForTokens } = await import('./services/googleMeet.js');
+      const tokens = await exchangeCodeForTokens(code);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          googleAccessToken: tokens.access_token ?? null,
+          googleRefreshToken: tokens.refresh_token ?? null,
+        },
+      });
+
+      logger.info({ userId }, 'Google OAuth connected via callback');
+
+      // Redirect back to the frontend
+      return reply.redirect(`${FRONTEND_URL}/dashboard?google=connected`);
+    } catch (error) {
+      logger.error({ error }, 'Google OAuth callback failed');
+      return reply.redirect(`${FRONTEND_URL}/dashboard?google=error`);
+    }
+  });
+
   // Stripe webhook (raw body needed)
   fastify.post('/api/webhooks/stripe', async (request, reply) => {
     // Stripe webhook handling is done here because it needs raw body
     // Full implementation in billing service
     reply.send({ received: true });
   });
+
+  // ============================================================
+  // Serve frontend in production (Cloud Run serves both API + SPA)
+  // ============================================================
+
+  if (process.env.NODE_ENV === 'production') {
+    const clientDir = path.resolve(process.cwd(), 'dist/client');
+    try {
+      await fs.access(clientDir);
+      await fastify.register(fastifyStatic, {
+        root: clientDir,
+        prefix: '/',
+        decorateReply: false,
+        wildcard: false,
+      });
+      // SPA fallback: serve index.html for any non-API route
+      fastify.setNotFoundHandler(async (_request, reply) => {
+        return reply.sendFile('index.html', clientDir);
+      });
+      logger.info({ dir: clientDir }, 'Serving production frontend');
+    } catch {
+      logger.info('No dist/client found — frontend not bundled in this build');
+    }
+  }
 
   // ============================================================
   // Graceful Shutdown

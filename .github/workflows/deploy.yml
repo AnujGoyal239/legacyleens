@@ -1,0 +1,96 @@
+# ============================================================
+# LegacyLens — Deploy to GCP Cloud Run via GitHub Actions
+# Triggers on push to master branch.
+# ============================================================
+
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [master]
+
+env:
+  GCP_REGION: us-central1
+  GAR_REPO: legacylens
+  API_SERVICE: legacylens-api
+  WORKER_SERVICE: legacylens-worker
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GAR_REPO }}/legacylens:${{ github.sha }} \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GAR_REPO }}/legacylens:latest \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push --all-tags \
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GAR_REPO }}/legacylens
+
+      - name: Deploy API to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.API_SERVICE }}
+          region: ${{ env.GCP_REGION }}
+          image: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GAR_REPO }}/legacylens:${{ github.sha }}
+          flags: |
+            --port=8080
+            --memory=1Gi
+            --cpu=1
+            --min-instances=0
+            --max-instances=5
+            --allow-unauthenticated
+          env_vars: |
+            NODE_ENV=production
+
+      - name: Deploy Worker to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.WORKER_SERVICE }}
+          region: ${{ env.GCP_REGION }}
+          image: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GAR_REPO }}/legacylens:${{ github.sha }}
+          flags: |
+            --port=8080
+            --memory=1Gi
+            --cpu=1
+            --min-instances=1
+            --max-instances=3
+            --no-allow-unauthenticated
+            --command=node
+            --args=dist/workers/index.js
+          env_vars: |
+            NODE_ENV=production
+
+      - name: Show deployment URLs
+        run: |
+          echo "API URL:"
+          gcloud run services describe ${{ env.API_SERVICE }} \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)'
+          echo "Worker URL:"
+          gcloud run services describe ${{ env.WORKER_SERVICE }} \
+            --region=${{ env.GCP_REGION }} \
+            --format='value(status.url)'

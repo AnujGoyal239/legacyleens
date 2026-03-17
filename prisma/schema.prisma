@@ -31,6 +31,10 @@ model User {
   githubToken    String? @map("github_token") // Encrypted
   githubUsername String? @map("github_username")
 
+  // Google OAuth (for Google Meet / Calendar)
+  googleAccessToken  String? @map("google_access_token")
+  googleRefreshToken String? @map("google_refresh_token")
+
   // Billing
   credits          Int    @default(3000)
   subscriptionTier String @default("free") @map("subscription_tier") // free, pro, team, enterprise
@@ -277,10 +281,14 @@ model Meeting {
 
   title           String?
   durationSeconds Int?    @map("duration_seconds")
-  fileUrl         String? @map("file_url") // Backblaze B2 URL; null for live meetings
+  fileUrl         String? @map("file_url") // Storage URL; null for live meetings
 
-  // Source: upload (file) or live (recorded in-app)
-  source String @default("upload") @map("source") // upload | live
+  // Source: upload (file), live (recorded in-app), or google_meet
+  source String @default("upload") @map("source") // upload | live | google_meet
+
+  // Google Meet integration
+  googleEventId String? @map("google_event_id")
+  googleMeetLink String? @map("google_meet_link")
 
   // Transcription
   transcriptionStatus String  @default("pending") @map("transcription_status") // pending, processing, complete, failed, live

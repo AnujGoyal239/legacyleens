@@ -30,10 +30,10 @@ import Team from './pages/Team';
 import Chat from './pages/Chat';
 import Meetings from './pages/Meetings';
 import MeetingDetail from './pages/MeetingDetail';
-import DevOps from './pages/DevOps';
+// import DevOps from './pages/DevOps';
 import History from './pages/History';
 import Documentation from './pages/Documentation';
-import Insights from './pages/Insights';
+// import Insights from './pages/Insights';
 import Account from './pages/Account';
 import AuthCallback from './pages/AuthCallback';
 import ToastContainer from './components/ui/ToastContainer';
@@ -75,10 +75,10 @@ export default function App() {
           <Route path="project/:id/chat" element={<Chat />} />
           <Route path="project/:id/meetings" element={<Meetings />} />
           <Route path="project/:id/meetings/:meetingId" element={<MeetingDetail />} />
-          <Route path="project/:id/devops" element={<DevOps />} />
+          {/* <Route path="project/:id/devops" element={<DevOps />} /> */}
           <Route path="project/:id/history" element={<History />} />
           <Route path="project/:id/documentation" element={<Documentation />} />
-          <Route path="project/:id/insights" element={<Insights />} />
+          {/* <Route path="project/:id/insights" element={<Insights />} /> */}
           <Route path="account" element={<Account />} />
         </Route>
 

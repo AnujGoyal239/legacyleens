@@ -30,21 +30,6 @@ Ideas that build on what you already have (codebase intelligence, DevOps Helper,
 **Why powerful:** Turns “we should refactor” into “here’s the first step,” especially for juniors.
 
 ---
-
-## 3. Onboarding checklist & learning path
-
-**What:** Auto-generated “first week” plan for a new dev.
-
-- **Day 1:** “Read these 3 entry-point files and this README section.”
-- **Day 2:** “Run the app locally; here’s the setup from the repo.”
-- **Day 3:** “Make a small change in this low-risk file and open a PR.”
-- **Day 4–5:** “Explore the architecture; answer these 5 Q&A questions.”
-- Integrate with your **task board**: pre-fill cards from the learning path; mark “Read X” as done.
-
-**Why powerful:** Cuts “where do I start?” to zero and shortens time-to-first-PR.
-
----
-
 ## 4. API surface map
 
 **What:** Explicit map of “what does this codebase expose?”
@@ -198,7 +183,6 @@ Ideas that build on what you already have (codebase intelligence, DevOps Helper,
 |----------------------------|----------------|-------------------------|----------------|
 | Codebase health dashboard  | High           | Yes (graph, index)      | Medium         |
 | Refactor suggestions       | High           | Yes (RAG, LLM)          | Medium         |
-| Onboarding learning path   | High           | Yes (board, entries)    | Low–Medium     |
 | API surface map            | High           | Yes (parser, graph)     | Medium         |
 | IDE extension             | High           | Yes (API exists)        | Medium         |
 | Branch/diff impact         | High           | Yes (blast radius)      | Low            |
@@ -211,17 +195,3 @@ Ideas that build on what you already have (codebase intelligence, DevOps Helper,
 | Doc generation             | Medium         | Yes (LLM)               | Low–Medium     |
 | Scheduled reports          | Medium         | Yes (cron + email)      | Low            |
 | AI “fix it” / PR drafts    | Very high      | Yes (LLM + GitHub API)  | High           |
-
----
-
-## Suggested “next 3” to maximize impact
-
-1. **Branch/diff impact** — Reuse blast radius + recent commits; add “compare branch vs main” and “impact summary.” Low effort, high value for safe deploys.
-2. **Codebase health dashboard** — Duplicate detection (embeddings), dead code (graph), outdated deps (parse lockfiles). One new tab “Health” per project.
-3. **Onboarding learning path** — Auto-generate a 5-day checklist from entry points + risk; link to task board cards. Uses data you already have.
-
-After that: **IDE extension** (multiplier on everything) and **refactor suggestions** (differentiator vs “just Q&A”).
-
----
-
-*You can copy any section into your PRD or roadmap and break it into tasks the same way you did for DevOps.*

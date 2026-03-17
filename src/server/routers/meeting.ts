@@ -107,6 +107,8 @@ export const meetingRouter = router({
           summary: true,
           createdAt: true,
           insights: true,
+          googleEventId: true,
+          googleMeetLink: true,
         },
       });
 

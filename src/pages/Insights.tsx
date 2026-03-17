@@ -640,7 +640,7 @@ export default function Insights() {
             )}
           </section>
           {!fixResult && (
-            <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500">
               Enter an instruction above to get AI-powered fix suggestions. You can then create a GitHub Pull Request directly from here.
             </p>
           )}
