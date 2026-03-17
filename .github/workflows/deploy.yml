@@ -1,13 +1,13 @@
 # ============================================================
 # LegacyLens — Deploy to GCP Cloud Run via GitHub Actions
-# Triggers on push to master branch.
+# Triggers on push to main branch.
 # ============================================================
 
 name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 env:
   GCP_REGION: us-central1
