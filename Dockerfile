@@ -19,6 +19,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 COPY . .
 
+# Build args for Vite (baked into the frontend bundle at build time)
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ARG VITE_API_URL
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+ENV VITE_API_URL=$VITE_API_URL
+
 # Build Vite frontend
 RUN npm run build:client
 
@@ -33,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy production node_modules
+# Copy production node_modules (includes prisma CLI)
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma ./prisma
 
@@ -54,6 +60,6 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-# Default: run the API server
+# Default: run DB migration then start the API server
 # Override CMD in Cloud Run for the worker service
-CMD ["node", "dist/server/index.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server/index.js"]

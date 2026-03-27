@@ -2,6 +2,7 @@ node_modules
 dist
 .env
 .env.local
+.env.*.local
 .git
 .gitignore
 *.md
@@ -9,4 +10,10 @@ Docs
 uploads
 .cursor
 .vscode
+.kiro
 *.log
+*.stackdump
+LegacyLensLocal
+tmp
+temp
+coverage

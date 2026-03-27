@@ -52,5 +52,11 @@ tmp/
 temp/
 *.tmp
 
+# Legacy subfolder (consolidated into root)
+LegacyLensLocal/
+
+# Windows crash dumps
+*.stackdump
+
 # Sentry
 .sentryclirc

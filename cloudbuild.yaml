@@ -8,6 +8,10 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--build-arg'
+      - 'VITE_CLERK_PUBLISHABLE_KEY=${_VITE_CLERK_PUBLISHABLE_KEY}'
+      - '--build-arg'
+      - 'VITE_API_URL=https://${_API_DOMAIN}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/legacylens:${SHORT_SHA}'
       - '-t'
@@ -46,7 +50,9 @@ steps:
       - '--max-instances'
       - '5'
       - '--set-env-vars'
-      - 'NODE_ENV=production'
+      - 'NODE_ENV=production,FRONTEND_URL=https://${_FRONTEND_DOMAIN}'
+      - '--update-secrets'
+      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,CLERK_SECRET_KEY=CLERK_SECRET_KEY:latest,GROQ_API_KEY=GROQ_API_KEY:latest,COHERE_API_KEY=COHERE_API_KEY:latest,B2_KEY_ID=B2_KEY_ID:latest,B2_APPLICATION_KEY=B2_APPLICATION_KEY:latest,B2_BUCKET_NAME=B2_BUCKET_NAME:latest,B2_BUCKET_ID=B2_BUCKET_ID:latest'
 
   # Deploy Worker to Cloud Run (always-on, min 1 instance)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -78,10 +84,15 @@ steps:
       - 'dist/workers/index.js'
       - '--set-env-vars'
       - 'NODE_ENV=production'
+      - '--update-secrets'
+      - 'DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GROQ_API_KEY=GROQ_API_KEY:latest,COHERE_API_KEY=COHERE_API_KEY:latest,B2_KEY_ID=B2_KEY_ID:latest,B2_APPLICATION_KEY=B2_APPLICATION_KEY:latest,B2_BUCKET_NAME=B2_BUCKET_NAME:latest,B2_BUCKET_ID=B2_BUCKET_ID:latest'
 
 substitutions:
   _REGION: 'us-central1'
   _REPO: 'legacylens'
+  _API_DOMAIN: 'legacylens-api-xxxx-uc.a.run.app'      # Replace with your Cloud Run API URL
+  _FRONTEND_DOMAIN: 'legacylens-api-xxxx-uc.a.run.app' # Same as API (SPA served from same container)
+  _VITE_CLERK_PUBLISHABLE_KEY: 'pk_live_...'            # Replace with your Clerk publishable key
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/legacylens'
