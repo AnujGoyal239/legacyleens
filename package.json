@@ -10,6 +10,7 @@
     "dev:server": "tsx watch src/server/index.ts",
     "dev:worker": "tsx watch src/workers/index.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
+    "vercel-build": "vite build",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
@@ -74,6 +75,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@vercel/node": "^5.0.0",
     "@eslint/js": "^9.19.0",
     "@tailwindcss/typography": "^0.5.16",
     "@types/d3": "^7.4.3",

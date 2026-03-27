@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist-api",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@server/*": ["./src/server/*"]
+    }
+  },
+  "include": [
+    "api/**/*.ts",
+    "src/server/**/*.ts",
+    "src/workers/**/*.ts",
+    "src/types/**/*.ts"
+  ]
+}

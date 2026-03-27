@@ -39,7 +39,23 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist/client',
-    sourcemap: true,
+    outDir: 'dist',
+    sourcemap: false, // disable in prod to reduce bundle size
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Clerk auth
+          'vendor-clerk': ['@clerk/clerk-react'],
+          // tRPC + React Query
+          'vendor-trpc': ['@trpc/client', '@trpc/react-query', '@tanstack/react-query', 'superjson'],
+          // UI / charts
+          'vendor-charts': ['recharts', 'd3'],
+          // DnD
+          'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+        },
+      },
+    },
   },
 });
